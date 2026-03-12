@@ -1,109 +1,86 @@
 import streamlit as st
-import requests
-import sqlite3
-from datetime import datetime
+import google.generativeai as genai
+import pandas as pd
+import altair as alt
+import random
 
-# Page setup
+# Configure Gemini API
+genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+
+model = genai.GenerativeModel("gemini-1.5-flash")
+
+# Page config
 st.set_page_config(
     page_title="AI Tutor Pro",
     page_icon="🎓",
     layout="wide"
 )
 
-# Hugging Face Router API
-API_URL = "https://router.huggingface.co/hf-inference/models/mistralai/Mistral-7B-Instruct-v0.2"
+st.title("🎓 AI Student Tutor")
+st.write("Ask me any question and I will help you learn!")
 
-HF_TOKEN = st.secrets["HF_TOKEN"]
-
-headers = {
-    "Authorization": f"Bearer {HF_TOKEN}",
-    "Content-Type": "application/json"
-}
-
-
-# Database setup
-def init_db():
-    conn = sqlite3.connect("chat_history.db", check_same_thread=False)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS chats (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        question TEXT,
-        answer TEXT,
-        time TEXT
-    )
-    """)
-
-    conn.commit()
-    return conn
-
-
-conn = init_db()
-
-
-# AI response
-def ask_ai(question):
-
-    payload = {
-        "inputs": question,
-        "parameters": {
-            "max_new_tokens": 300,
-            "temperature": 0.7
-        }
-    }
-
-    try:
-        response = requests.post(API_URL, headers=headers, json=payload)
-        result = response.json()
-
-        if isinstance(result, list):
-            return result[0]["generated_text"]
-
-        if "error" in result:
-            return result["error"]
-
-        return "AI is busy. Try again."
-
-    except Exception as e:
-        return str(e)
-
-
-# UI
-st.title("🎓 AI Tutor Pro")
-
+# Chat memory
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Sidebar subject selector
+st.sidebar.header("Tutor Settings")
+
+subject = st.sidebar.selectbox(
+    "Choose Subject",
+    ["General", "Math", "Science", "Programming", "History"]
+)
+
+# Dynamic chart
+st.subheader("📊 Weekly Learning Activity")
+
+data = pd.DataFrame({
+    "Day": ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"],
+    "Questions": [random.randint(1,10) for _ in range(7)]
+})
+
+chart = alt.Chart(data).mark_bar().encode(
+    x="Day",
+    y="Questions",
+    color="Questions"
+)
+
+st.altair_chart(chart, use_container_width=True)
+
+# Show chat history
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
 
 # User input
-question = st.chat_input("Ask your tutor anything...")
+prompt = st.chat_input("Ask your tutor a question...")
 
-if question:
+if prompt:
 
-    st.session_state.messages.append({"role": "user", "content": question})
+    st.session_state.messages.append({
+        "role":"user",
+        "content":prompt
+    })
 
-    with st.spinner("Thinking..."):
+    with st.chat_message("user"):
+        st.write(prompt)
 
-        answer = ask_ai(question)
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
 
-    st.session_state.messages.append({"role": "assistant", "content": answer})
+            response = model.generate_content(
+                f"You are an expert tutor helping students learn {subject}. "
+                f"Explain clearly with examples.\n\nQuestion: {prompt}"
+            )
 
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO chats (question,answer,time) VALUES (?,?,?)",
-        (question, answer, datetime.now().strftime("%H:%M"))
-    )
-    conn.commit()
+            answer = response.text
 
+            st.write(answer)
 
-# Display chat
-for msg in st.session_state.messages:
+    st.session_state.messages.append({
+        "role":"assistant",
+        "content":answer
+    })
 
-    if msg["role"] == "user":
-        with st.chat_message("user"):
-            st.write(msg["content"])
-
-    else:
-        with st.chat_message("assistant"):
-            st.write(msg["content"])
+st.markdown("---")
+st.caption("AI Tutor • Powered by Google Gemini + Streamlit")
