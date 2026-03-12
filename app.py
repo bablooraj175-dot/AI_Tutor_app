@@ -4,26 +4,28 @@ import pandas as pd
 import altair as alt
 import random
 
-# Configure Gemini API
+# Configure Gemini API securely
 genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 
+# Load Gemini model
 model = genai.GenerativeModel("gemini-1.5-flash")
 
-# Page config
+# Page settings
 st.set_page_config(
     page_title="AI Tutor Pro",
     page_icon="🎓",
     layout="wide"
 )
 
+# Title
 st.title("🎓 AI Student Tutor")
-st.write("Ask me any question and I will help you learn!")
+st.write("Ask any question and get help from your AI tutor!")
 
 # Chat memory
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Sidebar subject selector
+# Sidebar
 st.sidebar.header("Tutor Settings")
 
 subject = st.sidebar.selectbox(
@@ -57,9 +59,10 @@ prompt = st.chat_input("Ask your tutor a question...")
 
 if prompt:
 
+    # Save user message
     st.session_state.messages.append({
-        "role":"user",
-        "content":prompt
+        "role": "user",
+        "content": prompt
     })
 
     with st.chat_message("user"):
@@ -68,19 +71,24 @@ if prompt:
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
 
-            response = model.generate_content(
-                f"You are an expert tutor helping students learn {subject}. "
-                f"Explain clearly with examples.\n\nQuestion: {prompt}"
-            )
+            try:
+                response = model.generate_content(
+                    f"You are an expert tutor teaching {subject}. "
+                    f"Explain clearly and simply with examples.\n\nQuestion: {prompt}"
+                )
 
-            answer = response.text
+                answer = response.text
+
+            except Exception as e:
+                answer = "⚠️ Sorry, I couldn't generate a response."
 
             st.write(answer)
 
+    # Save AI message
     st.session_state.messages.append({
-        "role":"assistant",
-        "content":answer
+        "role": "assistant",
+        "content": answer
     })
 
 st.markdown("---")
-st.caption("AI Tutor • Powered by Google Gemini + Streamlit")
+st.caption("AI Tutor • Powered by Streamlit + Google Gemini")
