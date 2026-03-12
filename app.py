@@ -1,116 +1,109 @@
 import streamlit as st
-import sqlite3
-import pandas as pd
 import requests
-import time
+import sqlite3
 from datetime import datetime
 
-# Page configuration - MUST BE FIRST
+# Page setup
 st.set_page_config(
-    page_title="AI Student Tutor Pro",
+    page_title="AI Tutor Pro",
     page_icon="🎓",
     layout="wide"
 )
 
-# Secure Token & API Setup
-API_URL = "https://api-inference.huggingface.co/models/google/flan-t5-large"
-# Replace the hardcoded token with st.secrets for safety
-try:
-    HF_TOKEN = st.secrets["HF_TOKEN"]
-except:
-    HF_TOKEN = "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" # Fallback (not recommended for public)
+# Hugging Face Router API
+API_URL = "https://router.huggingface.co/hf-inference/models/mistralai/Mistral-7B-Instruct-v0.2"
 
-headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+HF_TOKEN = st.secrets["HF_TOKEN"]
 
-class StudentTutorPro:
-    def __init__(self):
-        self.conn = self.init_db()
-        self.subject_prompts = {
-            "Mathematics": "You are a math tutor. Solve step by step.",
-            "Programming": "You are a Python programming tutor. Provide code examples.",
-            "Electrical Engineering": "You are an electrical engineering tutor.",
-            "General": "You are a helpful tutor."
+headers = {
+    "Authorization": f"Bearer {HF_TOKEN}",
+    "Content-Type": "application/json"
+}
+
+
+# Database setup
+def init_db():
+    conn = sqlite3.connect("chat_history.db", check_same_thread=False)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS chats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        question TEXT,
+        answer TEXT,
+        time TEXT
+    )
+    """)
+
+    conn.commit()
+    return conn
+
+
+conn = init_db()
+
+
+# AI response
+def ask_ai(question):
+
+    payload = {
+        "inputs": question,
+        "parameters": {
+            "max_new_tokens": 300,
+            "temperature": 0.7
         }
+    }
 
-    def init_db(self):
-        conn = sqlite3.connect("student_tutor_pro.db", check_same_thread=False)
-        cursor = conn.cursor()
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS chats (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            question TEXT, answer TEXT, subject TEXT, timestamp TEXT
-        )""")
-        conn.commit()
-        return conn
+    try:
+        response = requests.post(API_URL, headers=headers, json=payload)
+        result = response.json()
 
-    def detect_subject(self, question):
-        q = question.lower()
-        if any(word in q for word in ["math","algebra","calculus","derivative"]): return "Mathematics"
-        if any(word in q for word in ["python","code","program","loop"]): return "Programming"
-        if any(word in q for word in ["motor","transformer","voltage","current"]): return "Electrical Engineering"
-        return "General"
+        if isinstance(result, list):
+            return result[0]["generated_text"]
 
-    def get_ai_response(self, question):
-        subject = self.detect_subject(question)
-        prompt = f"{self.subject_prompts[subject]}\n\nQuestion: {question}"
-        payload = {"inputs": prompt, "options": {"wait_for_model": True}} # Tells HF to wait if loading
-        
-        try:
-            response = requests.post(API_URL, headers=headers, json=payload)
-            result = response.json()
-            
-            # Handle the specific way Flan-T5 returns text
-            if isinstance(result, list) and len(result) > 0:
-                answer = result[0].get("generated_text", "I couldn't generate an answer.")
-            elif "error" in result:
-                answer = f"AI Error: {result['error']}"
-            else:
-                answer = "The AI is currently busy. Please try again in a moment."
-        except Exception as e:
-            answer = f"Connection Error: {str(e)}"
+        if "error" in result:
+            return result["error"]
 
-        return answer, subject
+        return "AI is busy. Try again."
 
-    def save_chat(self, question, answer, subject):
-        cursor = self.conn.cursor()
-        cursor.execute(
-            "INSERT INTO chats (question,answer,subject,timestamp) VALUES (?,?,?,?)",
-            (question, answer, subject, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        )
-        self.conn.commit()
+    except Exception as e:
+        return str(e)
 
-# Main App Logic
-def main():
-    app = StudentTutorPro()
-    st.markdown('<h1 style="color:#1f77b4;">🎓 AI Student Tutor Pro</h1>', unsafe_allow_html=True)
 
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
+# UI
+st.title("🎓 AI Tutor Pro")
 
-    question = st.text_input("Ask your tutor anything (Math, Circuits, Coding...):")
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-    if st.button("Get Answer"):
-        if question:
-            with st.spinner("AI is thinking... (may take a moment to wake up)"):
-                answer, subject = app.get_ai_response(question)
-                app.save_chat(question, answer, subject)
-                st.session_state.chat_history.append({
-                    "question": question, "answer": answer,
-                    "subject": subject, "time": datetime.now().strftime("%H:%M")
-                })
 
-    if st.session_state.chat_history:
-        st.subheader("Latest Answer")
-        latest = st.session_state.chat_history[-1]
-        st.info(f"**Subject:** {latest['subject']}")
-        st.write(latest["answer"])
+# User input
+question = st.chat_input("Ask your tutor anything...")
 
-    if st.session_state.chat_history:
-        st.subheader("History")
-        for chat in st.session_state.chat_history[::-1]:
-            with st.expander(f"{chat['time']} - {chat['subject']}"):
-                st.write(f"**Q:** {chat['question']}")
-                st.write(f"**A:** {chat['answer']}")
+if question:
 
-if __name__ == "__main__":
-    main()
+    st.session_state.messages.append({"role": "user", "content": question})
+
+    with st.spinner("Thinking..."):
+
+        answer = ask_ai(question)
+
+    st.session_state.messages.append({"role": "assistant", "content": answer})
+
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO chats (question,answer,time) VALUES (?,?,?)",
+        (question, answer, datetime.now().strftime("%H:%M"))
+    )
+    conn.commit()
+
+
+# Display chat
+for msg in st.session_state.messages:
+
+    if msg["role"] == "user":
+        with st.chat_message("user"):
+            st.write(msg["content"])
+
+    else:
+        with st.chat_message("assistant"):
+            st.write(msg["content"])
